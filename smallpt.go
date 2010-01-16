@@ -247,7 +247,7 @@ func Radiance(ray *Ray, depth int) *Vec {
 		Radiance(&Ray{x, tdir}, depth+1)).SMul(Tr)))
 }
 
-var w, h, samps int = 160, 120, 1
+var w, h, samps int = 1024, 768, 1
 var cam *Ray
 var colors []Vec
 
