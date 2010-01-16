@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 )
-var reflCalls uint64
 
 type Vec struct {
 	x, y, z float64
@@ -16,28 +15,40 @@ type Vec struct {
 
 var NULLVEC *Vec = &Vec{0.0, 0.0, 0.0}
 
+func (this *Vec) Zero() {
+	this.x = 0.0
+	this.y = 0.0
+	this.z = 0.0
+}
+
 func (this *Vec) String() string {
 	return fmt.Sprintf("{%f, %f, %f}", this.x, this.y, this.z)
 }
 
 func (this *Vec) Add(v *Vec) *Vec {
-	return &Vec{this.x + v.x, this.y + v.y, this.z + v.z}
+	this.x += v.x; this.y += v.y; this.z += v.z;
+	return this
 }
 
 func (this *Vec) Sub(v *Vec) *Vec {
-	return &Vec{this.x - v.x, this.y - v.y, this.z - v.z}
+	this.x -= v.x; this.y -= v.y; this.z -= v.z;
+	return this
 }
 
 func (this *Vec) Mul(v *Vec) *Vec {
-	return &Vec{this.x * v.x, this.y * v.y, this.z * v.z}
+	this.x *= v.x; this.y *= v.y; this.z *= v.z;
+	return this
 }
 
 func (this *Vec) SMul(f float64) *Vec {
-	return &Vec{this.x * f, this.y * f, this.z * f}
+	this.x *= f; this.y *= f; this.z *= f;
+	return this
 }
 
 func (this *Vec) Norm() *Vec {
-	return this.SMul(1.0/math.Sqrt(this.x * this.x + this.y * this.y + this.z * this.z))
+	l := math.Sqrt(this.x * this.x + this.y * this.y + this.z * this.z)
+	this.x /= l; this.y /= l; this.z /= l;
+	return this
 }
 
 func (this *Vec) Dot(v *Vec) float64 {
@@ -45,9 +56,24 @@ func (this *Vec) Dot(v *Vec) float64 {
 }
 
 func (this *Vec) Cross(v *Vec) *Vec {
-	return &Vec{this.y * v.z - this.z * v.y,
-		this.z * v.x - this.x * v.z,
-		this.x * v.y - this.y * v.x}
+	var x,y float64
+	x = this.y * v.z - this.z * v.y
+	y = this.z * v.x - this.x * v.z
+	this.z = this.x * v.y - this.y * v.x
+	this.x = x
+	this.y = y
+	return this
+}
+
+func (this *Vec) Clone() *Vec {
+	return &Vec{this.x, this.y, this.z}
+}
+
+func (this *Vec) Clamp() *Vec {
+	if this.x > 1.0 { this.x = 1.0 } else if this.x < 0.0 { this.x = 0.0 }
+	if this.y > 1.0 { this.y = 1.0 } else if this.y < 0.0 { this.y = 0.0 }
+	if this.z > 1.0 { this.z = 1.0 } else if this.z < 0.0 { this.z = 0.0 }
+	return this
 }
 
 type Ray struct {
@@ -71,7 +97,7 @@ type Sphere struct {
 }
 
 func (this *Sphere) Intersect(ray *Ray) float64 {
-	op := this.Position.Sub(ray.Origin)
+	op := this.Position.Clone().Sub(ray.Origin)
 	var eps float64 = 1e-4
 	var b float64 = op.Dot(ray.Direction)
 	var det float64 = b*b - op.Dot(op) + this.Radius * this.Radius
@@ -115,7 +141,7 @@ func ToByte(x float64) byte {
 
 func Intersect(ray *Ray, t *float64, id *int) bool {
 	var d, inf float64
-	inf = 1e20
+	inf = 1e50
 	*t = inf
 	for i, s := range spheres {
 		d = s.Intersect(ray)
@@ -128,24 +154,22 @@ func Intersect(ray *Ray, t *float64, id *int) bool {
 }
 
 func Radiance(ray *Ray, depth int) *Vec {
-	reflCalls++
-	//fmt.Printf("radiance(%s, %d, Xi);\n", ray, depth);
+
 	var t, p float64
 	var id int
 	if !Intersect(ray, &t, &id) {
-		return NULLVEC
+		return NULLVEC.Clone()
 	}
-	//fmt.Printf("hit = %d\n", id);
 	obj := spheres[id]
-	x := ray.Origin.Add(ray.Direction.SMul(t))
-	n := x.Sub(obj.Position).Norm()
+	x := ray.Origin.Clone().Add(ray.Direction.Clone().SMul(t))
+	n := x.Clone().Sub(obj.Position).Norm()
 	var nl *Vec
 	if n.Dot(ray.Direction) < 0.0 {
 		nl = n
 	} else {
-		nl = n.SMul(-1.0)
+		nl = n.Clone().SMul(-1.0)
 	}
-	f := obj.Color
+	f := obj.Color.Clone()
 	if f.x > f.y && f.x > f.z {
 		p = f.x
 	} else if f.y > f.z {
@@ -155,9 +179,9 @@ func Radiance(ray *Ray, depth int) *Vec {
 	}
 	if depth > 4 {
 		if rand.Float64() < p {
-			f = f.SMul(1.0/p)
+			f.SMul(1.0/p)
 		} else {
-			return obj.Emission
+			return obj.Emission.Clone()
 		}
 	}
 	if obj.Reflection == DIFF {
@@ -172,13 +196,14 @@ func Radiance(ray *Ray, depth int) *Vec {
 		} else {
 			u = &Vec{1.0, 0.0, 0.0}
 		}
-		v = w.Cross(u)
+		v = w.Clone().Cross(u)
+		//d = u.Clone().SMul(math.Cos(r1) * r2s).Add(v.Clone().SMul(math.Sin(r1) * r2s)).Add(w.Clone().SMul(math.Sqrt(1 - r2))).Norm()
 		d = u.SMul(math.Cos(r1) * r2s).Add(v.SMul(math.Sin(r1) * r2s)).Add(w.SMul(math.Sqrt(1 - r2))).Norm()
-		return obj.Emission.Add(f.Mul(Radiance(&Ray{x, d}, depth+1)))
+		return obj.Emission.Clone().Add(f.Mul(Radiance(&Ray{x, d}, depth+1)))
 	} else if obj.Reflection == SPEC {
-		return obj.Emission.Add(f.Mul(Radiance(&Ray{x, ray.Direction.Sub(n.SMul(2*n.Dot(ray.Direction)))}, depth+1)))
+		return obj.Emission.Clone().Add(f.Mul(Radiance(&Ray{x, ray.Direction.Clone().Sub(n.SMul(2*n.Dot(ray.Direction)))}, depth+1)))
 	}
-	var reflRay *Ray = &Ray{x, ray.Direction.Sub(n.SMul(2*n.Dot(ray.Direction)))}
+	var reflRay *Ray = &Ray{x, ray.Direction.Clone().Sub(n.Clone().SMul(2*n.Dot(ray.Direction)))}
 	var into bool = n.Dot(nl) > 0
 	var nc, nt float64 = 1, 1.5
 	var nnt, ddn, cos2t float64
@@ -190,13 +215,13 @@ func Radiance(ray *Ray, depth int) *Vec {
 	ddn = ray.Direction.Dot(nl)
 	cos2t = 1 - nnt * nnt * (1 - ddn * ddn)
 	if cos2t < 0 {
-		return obj.Emission.Add(f.Mul(Radiance(reflRay, depth+1)))
+		return obj.Emission.Clone().Add(f.Mul(Radiance(reflRay, depth+1)))
 	}
-	var tdir *Vec = ray.Direction.SMul(nnt)
+	var tdir *Vec = ray.Direction.Clone().SMul(nnt)
 	if into {
-		tdir = tdir.Sub(n.SMul(ddn*nnt+math.Sqrt(cos2t))).Norm()
+		tdir.Sub(n.Clone().SMul(ddn*nnt+math.Sqrt(cos2t))).Norm()
 	} else {
-		tdir = tdir.Sub(n.SMul(-(ddn*nnt+math.Sqrt(cos2t)))).Norm()
+		tdir.Sub(n.Clone().SMul(-(ddn*nnt+math.Sqrt(cos2t)))).Norm()
 	}
 	var a, b, c, R0, Re, Tr, P, RP, TP float64
 	a, b = nt-nc, nt+nc
@@ -213,120 +238,73 @@ func Radiance(ray *Ray, depth int) *Vec {
 	TP = Tr/(1-P)
 	if depth > 1 {
 		if rand.Float64() < P {
-			return obj.Emission.Add(f.Mul(Radiance(reflRay, depth+1).SMul(RP)))
+			return obj.Emission.Clone().Add(f.Mul(Radiance(reflRay, depth+1).SMul(RP)))
 		} else {
-			return obj.Emission.Add(f.Mul(Radiance(&Ray{x, tdir}, depth+1).SMul(TP)))
+			return obj.Emission.Clone().Add(f.Mul(Radiance(&Ray{x, tdir}, depth+1).SMul(TP)))
 		}
 	}
-	return obj.Emission.Add(f.Mul(Radiance(reflRay, depth+1).Add(
+	return obj.Emission.Clone().Add(f.Mul(Radiance(reflRay, depth+1).Add(
 		Radiance(&Ray{x, tdir}, depth+1)).SMul(Tr)))
+}
+
+var w, h, samps int = 160, 120, 1
+var cam *Ray
+var colors []Vec
+
+func renderPixel(x int, y int, cx *Vec, cy *Vec) {
+	var r1, r2 float64
+	var dx, dy float64
+	var radiance *Vec = new(Vec)
+	var direction *Vec
+
+	for sy, i := 0, (h-y-1)*w+x; sy<2; sy++ {
+		for sx := 0; sx<2; sx++ {
+			radiance.Zero()
+			for s := 0; s < samps; s++ {
+				r1, r2 = 2*rand.Float64(), 2*rand.Float64()
+				if r1 < 1 {
+					dx = math.Sqrt(r1) - 1
+				} else {
+					dx = 1 - math.Sqrt(2-r1)
+				}
+				if r2 < 1 {
+					dy = math.Sqrt(r2) -1
+				} else {
+					dy = 1 - math.Sqrt(2-r2)
+				}
+				direction = cx.Clone().SMul(((float64(sx)*.5+dx)/2+float64(x))/float64(w)-.5).Add(
+					cy.Clone().SMul(((float64(sy)+.5+dy)/2+float64(y))/float64(h)-.5)).Add(cam.Direction)
+				radiance.Add(Radiance(&Ray{cam.Origin.Clone().Add(direction.Clone().SMul(140.0)),direction.Clone().Norm()}, 0).SMul(1.0/float64(samps)))
+			}
+			(&colors[i]).Add(radiance.Clamp().SMul(0.25))
+		}
+	}
 }
 
 func main() {
 	flag.Parse()
-	var w, h, samps int = 1024, 768, 1
-	var cam *Ray = &Ray{&Vec{50,52,295.6}, (&Vec{0, -0.042612, -1}).Norm()}
-	var cx, cy, r *Vec
-	var c []Vec = make([]Vec, h*w)
+	var cx, cy *Vec
+	cam = &Ray{&Vec{50,52,295.6}, (&Vec{0, -0.042612, -1}).Norm()}
+	colors = make([]Vec, h*w)
 	if flag.NArg() > 0 {
 		samps, _ = strconv.Atoi(flag.Arg(0))
 		samps /= 4
 	}
 	cx = &Vec{float64(w) * 0.5135 / float64(h), 0.0, 0.0}
-	cy = cx.Cross(cam.Direction).Norm().SMul(0.5135)
+	cy = cx.Clone().Cross(cam.Direction).Norm().SMul(0.5135)
 	for y := 0; y < h; y++ {
-		fmt.Printf("\rRendering (%d spp) %5.2f %d",samps*4,100.*float(y)/(float(h)-1.0), reflCalls);
+		fmt.Printf("\rRendering (%d spp) %5.2f",samps*4,100.*float(y)/(float(h)-1.0));
 		for x := 0; x < w; x++ {
-			for sy, i := 0, (h-y-1)*w+x; sy<2; sy++ {
-				for sx := 0; sx<2; sx++ {
-					r = new(Vec)
-					for s := 0; s < samps; s++ {
-						var r1, r2 float64 = 2*rand.Float64(), 2*rand.Float64()
-						var dx, dy float64
-						if r1 < 1 {
-							dx = math.Sqrt(r1) - 1
-						} else {
-							dx = 1 - math.Sqrt(2-r1)
-						}
-						if r2 < 1 {
-							dy = math.Sqrt(r2) -1
-						} else {
-							dy = 1 - math.Sqrt(2-r2)
-						}
-						var d *Vec = cx.SMul(((float64(sx)*.5+dx)/2+float64(x))/float64(w)-.5).Add(
-							cy.SMul(((float64(sy)+.5+dy)/2+float64(y))/float64(h)-.5)).Add(cam.Direction)
-						r = r.Add(Radiance(&Ray{cam.Origin.Add(d.SMul(140.0)),d.Norm()}, 0).SMul(1.0/float64(samps)))
-					}
-					c[i] = *(&c[i]).Add((&Vec{Clamp(r.x), Clamp(r.y), Clamp(r.z)}).SMul(0.25))
-				}
-			}
+			renderPixel(x, y, cx, cy)
 		}
 	}
 
 	f, _ := os.Open("image.ppm", os.O_CREAT|os.O_WRONLY|os.O_TRUNC, 0666)
 	f.WriteString(fmt.Sprintf("P3\n%d %d\n%d\n", w, h, 255))
-	for _, color := range c {
+	for _, color := range colors {
 		f.WriteString(fmt.Sprintf("%d %d %d ", ToByte(color.x), ToByte(color.y), ToByte(color.z)))
 	}
 	f.Close()
-	fmt.Printf("\n%d\n", reflCalls)
-}
-
-func main_test() {
-	flag.Parse()
-	var w, h, samps int = 1024, 768, 1
-	var cam *Ray = &Ray{&Vec{50,52,295.6}, (&Vec{0, -0.042612, -1}).Norm()}
-	fmt.Printf("Camera = %s\n", cam);
-	var cx, cy, r *Vec
-	var c []Vec = make([]Vec, h*w)
-	if flag.NArg() > 0 {
-		samps, _ = strconv.Atoi(flag.Arg(0))
-		samps /= 4
-	}
-	cx = &Vec{float64(w) * 0.5135 / float64(h), 0.0, 0.0}
-	cy = cx.Cross(cam.Direction).Norm().SMul(0.5135)
-	fmt.Printf("cx = %s, cy = %s\n", cx, cy);
-	//for y := 0; y < h; y++ {
-	y:=0
-		fmt.Printf("\rRendering (%d spp) %5.2f %d",samps*4,100.*float(y)/(float(h)-1.0), reflCalls);
-	//for x := 0; x < w; x++ {
-	x:=0
-	//for sy, i := 0, (h-y-1)*w+x; sy<2; sy++ {
-	sy :=0; i:=(h-y-1)*w+x;
-	//for sx := 0; sx<2; sx++ {
-	sx := 0
-	r = new(Vec)
-	for s := 0; s < samps; s++ {
-		var r1, r2 float64 = 2*rand.Float64(), 2*rand.Float64()
-		//r1 = 0.0; r2 = 0.001971;
-		var dx, dy float64
-		if r1 < 1 {
-			dx = math.Sqrt(r1) - 1.0
-		} else {
-			dx = 1.0 - math.Sqrt(2.0 - r1)
-		}
-		if r2 < 1 {
-			dy = math.Sqrt(r2) - 1.0
-		} else {
-			dy = 1 - math.Sqrt(2.0 - r2)
-		}
-		fmt.Printf("r1 = %f, r2 = %f, dx = %f, dy = %f\n", r1, r2, dx, dy)
-		var d *Vec = cx.SMul(((float64(sx)*.5+dx)/2.0+float64(x))/float64(w)-.5).Add(
-			cy.SMul(((float64(sy)+.5+dy)/2+float64(y))/float64(h)-.5)).Add(cam.Direction)
-		fmt.Printf("d = %s\n", d);
-		fmt.Printf("r = %s\n", r);
-		r = r.Add(Radiance(&Ray{cam.Origin.Add(d.Norm().SMul(140.0)),d.Norm()}, 0).SMul(1.0/float64(samps)))
-		fmt.Printf("r = %s\n", r);
-	}
-	c[i] = *(&c[i]).Add((&Vec{Clamp(r.x), Clamp(r.y), Clamp(r.z)}).SMul(0.25))
-
-	f, _ := os.Open("image.ppm", os.O_CREAT|os.O_WRONLY|os.O_TRUNC, 0666)
-	f.WriteString(fmt.Sprintf("P3\n%d %d\n%d\n", w, h, 255))
-	for _, color := range c {
-		f.Write([]byte{ToByte(color.x), ToByte(color.y), ToByte(color.z)})
-	}
-	f.Close()
-	fmt.Printf("\n%d\n", reflCalls)
 }
 
 func main_TEST() {
